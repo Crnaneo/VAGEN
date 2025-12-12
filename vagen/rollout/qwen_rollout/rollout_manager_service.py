@@ -8,6 +8,8 @@ from transformers import PreTrainedTokenizer, ProcessorMixin
 from dataclasses import dataclass, field
 import PIL
 import re
+import os
+from PIL import Image
 
 from verl import DataProto
 from verl.utils.model import compute_position_id_with_mask
@@ -36,6 +38,10 @@ class QwenVLRolloutManagerService():
         self.env_states = None # dict
         self.batch_idx_to_env_id = None # dict
         self.env_client = BatchEnvClient(base_url=self.config.base_url,timeout=self.config.timeout,max_workers=self.config.max_workers)
+
+        # 创建图像保存目录
+        self.image_save_dir = getattr(config, 'image_save_dir', 'data/rendered_images')
+        os.makedirs(self.image_save_dir, exist_ok=True)
 
     @torch.no_grad()
     def _handle_special_tokens(self, llm_raw_response: str, prep_for_loss_mask: bool) -> str:
@@ -300,6 +306,19 @@ class QwenVLRolloutManagerService():
         if 'multi_modal_data' in obs:
             if image_placeholder in obs['multi_modal_data']:
                 record_entry['image_data'] = [process_image(image) for image in obs['multi_modal_data'][image_placeholder]]
+
+                # 自动保存图像到指定目录
+                step_idx = len(self.recorder[env_id])
+                env_save_dir = os.path.join(self.image_save_dir, str(env_id))
+                os.makedirs(env_save_dir, exist_ok=True)
+
+                for img_idx, img_array in enumerate(record_entry['image_data']):
+                    # img_array 是 numpy.ndarray (H, W, 3) RGB格式
+                    img_pil = Image.fromarray(img_array)
+                    save_path = os.path.join(env_save_dir, f"step_{step_idx:03d}_img_{img_idx}.png")
+                    img_pil.save(save_path)
+                    print(f"[RENDER] Saved image to: {save_path}")
+
         self.recorder[env_id].append(record_entry)
 
     @torch.no_grad()
